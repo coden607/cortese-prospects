@@ -8,4 +8,6 @@ Our missed-call text-back catches them: busy signal triggers an instant text —
 
 I'm local to the Southern Tier — happy to demo on your line, 20 minutes.
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

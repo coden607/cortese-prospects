@@ -8,4 +8,6 @@ We built a missed-call text-back for exactly this: busy line fires an instant te
 
 No new number, no app, no training. I'm an hour up 81 — happy to demo in 20 minutes.
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

@@ -10,4 +10,6 @@ $0 upfront. We invoice 15% of recovered sales only. No new numbers, no apps, no 
 
 Could I demo it on one store's line? Twenty minutes, any slow afternoon.
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

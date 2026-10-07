@@ -8,4 +8,6 @@ We built a missed-call text-back for exactly this: a busy line fires an instant 
 
 Recovered volume tracks your rush — directional, never a guarantee. Happy to demo in 20 minutes with a Clarks Summit number.
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

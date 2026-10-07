@@ -8,4 +8,6 @@ Our missed-call text-back turns busy signals into orders: the caller instantly g
 
 No new number, no app, no training. I'm local to the Southern Tier — 20-minute demo any slow afternoon.
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

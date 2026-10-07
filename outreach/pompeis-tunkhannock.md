@@ -8,4 +8,6 @@ We built a missed-call text-back for exactly this: a busy line fires an instant 
 
 How much is on the table depends on your call volume — directional, never a guarantee. Happy to demo in 20 minutes; I'll text you a working example you can watch land on the tablet.
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

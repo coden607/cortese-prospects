@@ -8,4 +8,6 @@ We built a missed-call text-back for exactly this: when your line is busy, the c
 
 How much comes back depends on your Friday rush — directional, never a guarantee. I'd love to show you a live demo with a Towanda number; say the word and I'll text you a working example.
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

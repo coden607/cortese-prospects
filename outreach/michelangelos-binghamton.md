@@ -10,4 +10,6 @@ No new number, no app, no staff retraining. $0 upfront — we bill 15% of recove
 
 I'm local. Happy to test it on your line — 20 minutes, any quiet afternoon.
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

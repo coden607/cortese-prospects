@@ -10,4 +10,6 @@ Our missed-call text-back catches that call: busy signal fires an instant text �
 
 Local guy, 20-minute demo on your line. Interested?
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

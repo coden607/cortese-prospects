@@ -8,4 +8,6 @@ I run the Busy-Line Recovery Engine out of Binghamton: $0 upfront, no new number
 
 I'm up and down I-81 weekly — happy to stop in for a 20-minute demo, or show you over a quick call. (Stats are directional, never guarantees.)
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

@@ -12,4 +12,6 @@ The fix: a busy line instantly texts the caller — "Sorry we missed you — tex
 
 Open to a short call?
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

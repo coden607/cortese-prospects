@@ -10,4 +10,6 @@ I'm a one-man operation out of Binghamton, NY, and I'm expanding the service bey
 
 Worth a quick look at how it'd catch the calls your line can't?
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

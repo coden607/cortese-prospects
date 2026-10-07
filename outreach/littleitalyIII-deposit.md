@@ -8,4 +8,6 @@ We built a missed-call text-back for exactly this: busy line fires an instant te
 
 Want a live demo with a Deposit number? Two minutes, any afternoon that suits.
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

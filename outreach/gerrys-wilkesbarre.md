@@ -10,4 +10,6 @@ We built a missed-call text-back for exactly this: busy line fires an instant te
 
 Happy to demo it live with a Wilkes-Barre number — two minutes at your counter, any time prep allows.
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

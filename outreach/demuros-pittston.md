@@ -8,4 +8,6 @@ We built a missed-call text-back for exactly this: a busy line fires an instant 
 
 Directional, never a guarantee — depends how hard the rush hits. I'd love to demo with a Pittston number; 20 minutes at the counter.
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out

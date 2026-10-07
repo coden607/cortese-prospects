@@ -8,4 +8,6 @@ We built a missed-call text-back for exactly this: when your line's busy, the ca
 
 Happy to text you a live demo from a Whitney Point number whenever's convenient — takes two minutes.
 
+See it work — 30 seconds, right on your phone: https://coden607.github.io/links/busyline-demo/
+
 — Stephen Blanford · Binghamton, NY · reply STOP to opt out
