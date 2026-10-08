@@ -1,0 +1,3 @@
+# QUEUED FOR 2026-01-01 SENDS (fixture)
+alpha@alpha.example | Alpha Pizza (Testville NY) | own-site footer | needs draft
+beta-wings | Beta Wings (Testville) | email not found yet | retry scout first
