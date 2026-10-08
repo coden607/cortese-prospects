@@ -152,6 +152,108 @@ class HardFailureTest(FixtureCase):
         self.assertEqual(run(self.repo)[0], 0)
 
 
+class NameNormalizationTest(FixtureCase):
+    """Drop/duplicate/do-not-contact checks must not be bypassed by name variants."""
+
+    def queue(self, business: str, slug: str = "gamma-testville") -> None:
+        shutil.copy(self.repo / "outreach" / "alpha-testville.md", self.repo / "outreach" / f"{slug}.md")
+        self.append("outreach/manifest.csv", f"{slug},{business},{slug}.md,queued")
+
+    def test_drop_check_ignores_trailing_space(self) -> None:
+        self.queue("Gamma Diner ")
+        self.assertHardFailure("(Gamma Diner ): queued business is marked priority=drop")
+
+    def test_drop_check_ignores_capitalization(self) -> None:
+        self.queue("gamma DINER")
+        self.assertHardFailure("(gamma DINER): queued business is marked priority=drop")
+
+    def test_drop_check_collapses_internal_whitespace(self) -> None:
+        self.queue("Gamma   Diner")
+        self.assertHardFailure("(Gamma   Diner): queued business is marked priority=drop")
+
+    def test_near_match_to_drop_row_is_hard_error(self) -> None:
+        self.queue("Gamma Diner (Testville)")
+        out = self.assertHardFailure("queued business near-matches a dropped prospect: Gamma Diner (line 4)")
+        self.assertNotIn(validate.W_ORPHAN, out)
+
+    def test_near_match_with_suffix_to_drop_row_is_hard_error(self) -> None:
+        self.queue("Gamma Diner of Testville")
+        self.assertHardFailure("(Gamma Diner of Testville): queued business near-matches a dropped prospect")
+
+    def test_near_match_to_active_row_stays_warning(self) -> None:
+        self.queue("Alpha Pizza (Testville)", slug="alpha-two")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIn("Alpha Pizza (Testville) (slug alpha-two) — possible near-match, verify: Alpha Pizza", out)
+
+    def test_duplicate_business_case_variant(self) -> None:
+        self.queue("alpha  PIZZA ", slug="alpha-two")
+        self.assertHardFailure("duplicate business 'Alpha Pizza', 'alpha  PIZZA ' (2 rows)")
+
+    def test_duplicate_slug_case_variant(self) -> None:
+        self.queue("Alpha Pizza Two", slug="ALPHA-TESTVILLE")
+        self.assertHardFailure("duplicate slug 'alpha-testville', 'ALPHA-TESTVILLE' (2 rows)")
+
+    def test_do_not_contact_matches_normalized_names(self) -> None:
+        (self.repo / "outreach" / "do_not_contact.csv").write_text(
+            "business,town,reason,date\n  BETA   wings ,Testville,STOP reply,2026-10-01\n", encoding="utf-8"
+        )
+        self.assertHardFailure("(Beta Wings): business is on outreach/do_not_contact.csv")
+
+    def test_do_not_contact_matches_queue_variant(self) -> None:
+        (self.repo / "outreach" / "do_not_contact.csv").write_text(
+            "business,town,reason,date\nAlpha Pizza,Testville,STOP reply,2026-10-01\n", encoding="utf-8"
+        )
+        self.edit("outreach/manifest.csv", "alpha-testville,Alpha Pizza,", "alpha-testville,ALPHA pizza ,")
+        self.assertHardFailure("(ALPHA pizza ): business is on outreach/do_not_contact.csv")
+
+
+class EncodingAndStatusTest(FixtureCase):
+    def corrupt(self, rel: str) -> int:
+        """Insert an invalid UTF-8 byte after the first line; return its byte offset."""
+        path = self.repo / rel
+        data = path.read_bytes()
+        offset = data.index(b"\n") + 1
+        path.write_bytes(data[:offset] + b"\xff" + data[offset:])
+        return offset
+
+    def test_non_utf8_prospects_is_hard_error_not_traceback(self) -> None:
+        offset = self.corrupt("prospects.csv")
+        out = self.assertHardFailure(f"prospects.csv: not valid UTF-8 (byte {offset})")
+        self.assertNotIn("Traceback", out)
+
+    def test_non_utf8_manifest_is_hard_error(self) -> None:
+        offset = self.corrupt("outreach/manifest.csv")
+        self.assertHardFailure(f"outreach/manifest.csv: not valid UTF-8 (byte {offset})")
+
+    def test_non_utf8_draft_is_hard_error(self) -> None:
+        offset = self.corrupt("outreach/beta-testville.md")
+        self.assertHardFailure(f"outreach/beta-testville.md: not valid UTF-8 (byte {offset})")
+
+    def test_non_utf8_do_not_contact_is_hard_error(self) -> None:
+        (self.repo / "outreach" / "do_not_contact.csv").write_bytes(b"business\n\xffBeta Wings\n")
+        self.assertHardFailure("outreach/do_not_contact.csv: not valid UTF-8 (byte 9)")
+
+    def test_byte_order_mark_is_accepted(self) -> None:
+        for rel in ("prospects.csv", "outreach/manifest.csv", "outreach/alpha-testville.md"):
+            path = self.repo / rel
+            path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIn("0 errors, 0 warnings", out)
+
+    def test_non_queued_status_is_warning(self) -> None:
+        self.edit("outreach/manifest.csv", "beta-testville.md,queued", "beta-testville.md,sent")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"[1] {validate.W_STATUS}:", out)
+        self.assertIn("(Beta Wings): status 'sent'", out)
+
+    def test_opt_out_check_stays_case_sensitive(self) -> None:
+        self.edit("outreach/alpha-testville.md", "reply STOP to opt out", "reply stop to opt out")
+        self.assertHardFailure("outreach/alpha-testville.md: missing opt-out line")
+
+
 class WarningFixtureTest(FixtureCase):
     fixture = "warnings"
 
