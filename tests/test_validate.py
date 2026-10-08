@@ -292,8 +292,8 @@ class EncodingAndStatusTest(FixtureCase):
         self.assertHardFailure("outreach/alpha-testville.md: missing opt-out line")
 
 
-class LiveQueueTest(FixtureCase):
-    """Dated outreach/queue-YYYY-MM-DD.txt files are the live send queue."""
+class QueueHelpers(FixtureCase):
+    """Helpers for live-queue tests (defines no tests itself)."""
 
     QUEUE = "outreach/queue-2026-01-01.txt"
 
@@ -311,6 +311,10 @@ class LiveQueueTest(FixtureCase):
             f"{name},pizza & takeout,Testville,Test County NY,(555) 010-0009,,no,high,"
             f"independent,https://extra.example/,{priority},fixture row",
         )
+
+
+class LiveQueueTest(QueueHelpers):
+    """Dated outreach/queue-YYYY-MM-DD.txt files are the live send queue."""
 
     def test_comment_blank_and_slug_lines_are_tolerated(self) -> None:
         self.add("")
@@ -389,30 +393,53 @@ class LiveQueueTest(FixtureCase):
         self.assertNotIn("Traceback", out)
 
     def test_malformed_email_is_warning(self) -> None:
-        self.add("alpha@@alpha | Beta Wings | x | y")
-        self.add("Not A Slug | Beta Wings Two | x | y")
+        self.add("eps@@eps | Epsilon Subs | x | y")
+        self.add("Not A Slug | Eta Subs | x | y")
         code, out = run(self.repo)
         self.assertEqual(code, 0, out)
         self.assertIn(f"[2] {validate.W_EMAIL}:", out)
-        self.assertIn("(Beta Wings): 'alpha@@alpha'", out)
+        self.assertIn("(Epsilon Subs): 'eps@@eps'", out)
         self.assertIn("'Not A Slug' is neither an email nor a slug", out)
 
-    def test_duplicate_email_and_business_in_same_file_warn(self) -> None:
-        self.add("ALPHA@alpha.example | Beta Wings (Elsewhere) | x | y")
-        code, out = run(self.repo)
-        self.assertEqual(code, 0, out)
-        self.assertIn(f"[2] {validate.W_DUPLICATE}:", out)
-        self.assertIn("email 'alpha@alpha.example' appears 2x", out)
-        self.assertIn("business 'beta wings' appears 2x", out)
+    def test_duplicate_email_in_same_file_is_hard_error(self) -> None:
+        self.add("ALPHA@alpha.example | Epsilon Subs | x | y")
+        self.assertHardFailure("duplicate email 'alpha@alpha.example' queued 2x")
 
-    def test_same_business_on_different_dates_is_not_duplicate(self) -> None:
+    def test_duplicate_business_in_same_file_is_hard_error(self) -> None:
+        self.add("other@beta.example | BETA  wings (Elsewhere) | x | y")
+        self.assertHardFailure("duplicate business 'beta wings' queued 2x")
+
+    def test_duplicate_across_selected_files_is_hard_error(self) -> None:
         (self.repo / "outreach" / "queue-2026-01-02.txt").write_text(
             "alpha@alpha.example | Alpha Pizza | x | y\n", encoding="utf-8"
         )
+        out = self.assertHardFailure("duplicate email 'alpha@alpha.example' queued 2x")
+        self.assertIn("duplicate business 'alpha pizza' queued 2x", out)
+        self.assertIn("queue-2026-01-01.txt, queue-2026-01-02.txt", out)
+
+    def test_mailto_variant_counts_as_duplicate(self) -> None:
+        self.add("MAILTO:Alpha@Alpha.example | Epsilon Subs | x | y")
+        self.assertHardFailure("duplicate email 'alpha@alpha.example' queued 2x")
+
+    def test_requeue_of_past_email_warns_by_default(self) -> None:
+        (self.repo / "outreach" / "queue-2025-12-31.txt").write_text(
+            "# old\nalpha@alpha.example | Alpha Pizza | x | sent\n", encoding="utf-8"
+        )
         code, out = run(self.repo)
         self.assertEqual(code, 0, out)
-        self.assertNotIn(validate.W_DUPLICATE, out)
-        self.assertIn("queue-2026-01-01.txt, queue-2026-01-02.txt", out)
+        self.assertIn(f"[1] {validate.W_REQUEUE}:", out)
+        self.assertIn(
+            "'alpha@alpha.example' previously queued on 2025-12-31 (outreach/queue-2025-12-31.txt:2)", out
+        )
+        self.assertNotIn("live queue files checked (dated 2026-01-01 or later): queue-2025-12-31", out)
+
+    def test_requeue_of_past_email_is_hard_error_with_all_queues(self) -> None:
+        (self.repo / "outreach" / "queue-2025-12-31.txt").write_text(
+            "alpha@alpha.example | Alpha Pizza | x | sent\n", encoding="utf-8"
+        )
+        code, out = run(self.repo, "--all-queues")
+        self.assertEqual(code, 1, out)
+        self.assertIn("duplicate email 'alpha@alpha.example' queued 2x", out)
 
     def test_orphan_live_entry_is_named_warning_with_hint(self) -> None:
         self.add("z@zeta.example | Zeta Grill (Testville) | x | y")
@@ -452,9 +479,126 @@ class LiveQueueTest(FixtureCase):
 
     def test_readme_in_outreach_is_not_a_draft(self) -> None:
         (self.repo / "outreach" / "README-QUEUE.md").write_text("# Send queues\n", encoding="utf-8")
+        (self.repo / "outreach" / "README.md").write_text("# Outreach\n", encoding="utf-8")
         code, out = run(self.repo)
         self.assertEqual(code, 0, out)
         self.assertIn("2 drafts", out)
+        self.assertNotIn(validate.W_QUEUE_LIKE, out)
+
+    def test_other_readme_files_still_need_opt_out(self) -> None:
+        (self.repo / "outreach" / "README-draft-notes.md").write_text("Subject: x\n", encoding="utf-8")
+        self.assertHardFailure("outreach/README-draft-notes.md: missing opt-out line")
+
+
+class ReviewFixesTest(QueueHelpers):
+    """Cases from the PR #4 validator review."""
+
+    def only_queue_line(self, line: str) -> None:
+        (self.repo / "outreach" / "queue-2026-01-01.txt").write_text(
+            "# fixture\n" + line + "\n", encoding="utf-8"
+        )
+
+    def test_do_not_contact_variants_are_hard_errors(self) -> None:
+        self.dnc("Sharkey's Restaurant,,closed 2020,2026-10-08\nOpted Out Pizza,,STOP reply,2026-10-08\n")
+        cases = [
+            "s@sharkeys.example | Sharkey\u2019s Restaurant | x | y",
+            "s@sharkeys.example | Sharkeys Restaurant | x | y",
+            "s@sharkeys.example | Sharkey's (Binghamton) | x | y",
+            "s@sharkeys.example | Sharkey's Bar & Grill (Binghamton) | x | y",
+            "sharkeys-binghamton | Sharkeys (Binghamton) | x | y",
+            "sharkeys-binghamton | Glenwood Spiedies (Binghamton) | x | y",
+            "o@opted.example | Opted Out Pizzeria | x | y",
+            "s@sharkeys.example | The Sharkey's Restaurant | x | y",
+        ]
+        for line in cases:
+            with self.subTest(line=line):
+                self.only_queue_line(line)
+                code, out = run(self.repo)
+                self.assertEqual(code, 1, out)
+                self.assertIn("business is on outreach/do_not_contact.csv (matches", out)
+
+    def test_do_not_contact_does_not_match_trivially_short_keys(self) -> None:
+        self.dnc("Sal's Pizza,,closed,2026-10-08\n")
+        self.only_queue_line("s@salvatore.example | Salvatore's Pizzeria (Testville) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("do_not_contact.csv (matches", out)
+
+    def test_malformed_line_with_do_not_contact_email_is_hard_error(self) -> None:
+        self.dnc("Someone,stop@me.example,STOP reply,2026-10-08\n")
+        self.add("resend later to mailto:STOP@me.example please")
+        self.assertHardFailure("malformed queue line mentions an email on outreach/do_not_contact.csv")
+
+    def test_malformed_line_with_do_not_contact_name_is_hard_error(self) -> None:
+        self.dnc("Sharkey's Restaurant,,closed 2020,2026-10-08\n")
+        self.add("Sharkey\u2019s Restaurant - call back Friday")
+        self.assertHardFailure("malformed queue line mentions \"Sharkey's Restaurant\" from outreach/do_not_contact.csv")
+
+    def test_malformed_line_with_dropped_name_is_hard_error(self) -> None:
+        self.add("retry Gamma Diner after lunch")
+        self.assertHardFailure("malformed queue line mentions dropped prospect 'Gamma Diner'")
+
+    def test_curly_and_modifier_apostrophes_fold(self) -> None:
+        for ch in ("\u2019", "\u2018", "\u02bc"):
+            self.assertEqual(validate.name_key(f"Delta{ch}s Diner"), validate.name_key("Delta's Diner"))
+
+    def test_curly_apostrophe_exact_matches_drop_row(self) -> None:
+        self.add_prospect("Delta's Diner", priority="drop")
+        self.add("d@delta.example | Delta\u2019s Diner (Testville) | x | y")
+        self.assertHardFailure("(Delta\u2019s Diner (Testville)): queued business is marked priority=drop")
+
+    def test_mailto_prefix_is_stripped_before_email_checks(self) -> None:
+        self.add("mailto: eps@eps.example | Epsilon Subs | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn(validate.W_EMAIL, out)
+
+    def test_mailto_prefix_matches_do_not_contact_email(self) -> None:
+        self.dnc("Someone Else,Eps@eps.example,STOP reply,2026-10-08\nOther,mailto:z@z.example,x,2026-10-08\n")
+        self.add("MAILTO:EPS@eps.example | Epsilon Subs | x | y")
+        self.assertHardFailure("(Epsilon Subs): email is on outreach/do_not_contact.csv")
+        self.only_queue_line("z@z.example | Zeta Grill | x | y")
+        self.assertHardFailure("(Zeta Grill): email is on outreach/do_not_contact.csv")
+
+    def test_queue_files_found_case_insensitively(self) -> None:
+        (self.repo / "outreach" / "Queue-2026-01-02.TXT").write_text(
+            "g@gamma.example | Gamma Diner | x | y\n", encoding="utf-8"
+        )
+        out = self.assertHardFailure("outreach/Queue-2026-01-02.TXT:1 (Gamma Diner): queued business is marked")
+        self.assertIn("queue-2026-01-01.txt, Queue-2026-01-02.TXT", out)
+
+    def test_other_queue_like_files_are_warned(self) -> None:
+        for name in ("queue_2026-01-02.txt", "send-QUEUE.csv"):
+            (self.repo / "outreach" / name).write_text("x\n", encoding="utf-8")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"[2] {validate.W_QUEUE_LIKE}:", out)
+        self.assertIn("outreach/queue_2026-01-02.txt", out)
+        self.assertIn("outreach/send-QUEUE.csv", out)
+
+    def test_short_prefix_of_dropped_name_is_hard_error(self) -> None:
+        self.add("g@gamma.example | Gamma (Testville) | x | y")
+        self.assertHardFailure("(Gamma (Testville)): queued business near-matches a dropped prospect: Gamma Diner")
+
+    def test_leading_the_is_ignored(self) -> None:
+        self.add("g@gamma.example | The Gamma Diner (Testville) | x | y")
+        self.assertHardFailure("(The Gamma Diner (Testville)): queued business is marked priority=drop")
+
+    def test_prefix_near_match_with_active_row_stays_warning(self) -> None:
+        self.add_prospect("Gamma Grill")
+        self.add("g@gamma.example | Gamma (Testville) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIn("possible near-match, verify: Gamma Diner [drop]; Gamma Grill", out)
+
+    def test_middle_word_variant_is_a_documented_gap(self) -> None:
+        # Known limitation: an inserted middle word defeats prefix near-matching. It is
+        # still surfaced as an orphan warning, not silently accepted.
+        self.add("g@gamma.example | Gamma Italian Diner | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIn("Gamma Italian Diner [outreach/queue-2026-01-01.txt:4] — no similar name", out)
+
 
 
 class WarningFixtureTest(FixtureCase):

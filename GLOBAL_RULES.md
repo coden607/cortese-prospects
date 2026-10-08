@@ -17,10 +17,13 @@ Changes are mostly to CSV data, queue text files and Markdown documents.
   `outreach/README*.md` files are docs, not drafts (see `outreach/README-QUEUE.md`).
 - `outreach/queue-YYYY-MM-DD.txt` — the **live send queue**, one file per send date. One entry
   per line: `email | Business (Location) | source note | status note`; `#` lines are headers.
-  The first field may be a slug while the email is still being found.
-- `outreach/do_not_contact.csv` — `business,email,reason,added`. A live queue entry matching it
-  (business name or email) is a hard validation error; on the legacy manifest it is a
-  named warning. Only Stephen adds rows.
+  The first field may be a slug (or `mailto:` email) while the email is still being found.
+  File names are matched case-insensitively. The same email or business queued twice across
+  the checked files is a hard error.
+- `outreach/do_not_contact.csv` — `business,email,reason,added`. Matching is conservative
+  (normalized name, prefix either way, generic words like "pizza"/"restaurant" ignored, slug,
+  email). A live queue hit is a hard error; on the legacy manifest it is a named warning.
+  Only Stephen adds rows.
 - `outreach/manifest.csv` — **legacy** send queue (not sent from; last updated 2026-10-06).
   Header: `slug,business,email_draft_file,status(queued)`. Don't delete or reorder its rows.
 - `scripts/validate.py` — the validator. `tests/test_validate.py` + `tests/fixtures/` — its tests.
@@ -39,7 +42,8 @@ Changes are mostly to CSV data, queue text files and Markdown documents.
     hard failures; data-quality warnings are printed, grouped by section (live queue,
     legacy manifest, prospects/drafts/docs) with counts. By default it checks live queue
     files dated today or later (box local date).
-  - `python3 scripts/validate.py --all-queues` — also checks past-dated queue files.
+  - `python3 scripts/validate.py --all-queues` — also checks past-dated queue files (then a
+    re-queued email across dates is a hard duplicate; by default it is a warning).
   - `python3 scripts/validate.py --strict` — full check: warnings also fail. Expected to
     fail until the ticket-1 S2–S4 cleanup lands; its output is the cleanup backlog.
   - `python3 -m unittest discover -s tests -v` — validator tests. Includes a smoke test
