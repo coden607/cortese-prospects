@@ -10,7 +10,7 @@ Independent restaurants lose real money one ringing phone at a time. At Friday d
 
 ## What's in this repo
 
-- **`prospects.csv`** — 54 verified leads across 16 towns / 12 counties / 2 states. Columns include category, call-volume signal, chain vs. independent, source URL, priority (A = phone-first high-volume independent, B = good fit, C = corporate/online-first/low fit), and a one-line pitch angle.
+- **`prospects.csv`** — 129 verified leads (127 active, 2 flagged drop) across 57 towns. Columns include category, call-volume signal, chain vs. independent, source URL, priority (A = phone-first high-volume independent, B = good fit, C = corporate/online-first/low fit, drop = closed/disqualified), and a one-line pitch angle. Wave-4 expansion (Chicago / Cleveland / New Haven / Philly / Trenton, 20 leads) is staged in `wave4/` pending the merge + dedupe pass.
 - **`OUTREACH.md`** — the sales kit: offer, cold-call script, the busy-signal demo tactic, objection handling, monthly billing mechanic.
 - **`PLAYBOOK.md`** — the per-customer replication checklist (deploy → register → forward-test → handoff → pilot → report → go-live) plus churn-retention and land-and-expand mechanics.
 
