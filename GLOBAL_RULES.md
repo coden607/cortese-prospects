@@ -25,11 +25,13 @@ test suite or CI. Changes are to CSV data and Markdown documents.
 ## Commands
 - Runtime available: `python3` (3.13 on the factory box). Use the standard library only
   unless a spec explicitly justifies a dependency.
-- Validation: **none exists yet.** Until the validation-harness ticket lands, the
-  minimum check before any PR is that both CSVs still parse with a consistent column count:
-  `python3 -c "import csv;[print(f, {len(r) for r in csv.reader(open(f, newline=''))}) for f in ('prospects.csv','outreach/manifest.csv')]"`
-  (each file must print a set containing exactly one number: 12 and 4).
-- When a validation script is added, its exact command replaces the line above in this file.
+- Validation (run from the repo root; standard library only, no network):
+  - `python3 scripts/validate.py` — must exit 0 before any data commit. Exits 1 only on
+    hard failures; data-quality warnings are printed, grouped, with counts.
+  - `python3 scripts/validate.py --strict` — full check: warnings also fail. Expected to
+    fail until the ticket-1 S2–S4 cleanup lands; its output is the cleanup backlog.
+  - `python3 -m unittest discover -s tests -v` — validator tests. Includes a smoke test
+    against the real repo data, so a data commit that adds a hard failure breaks this suite.
 
 ## Data rules (from README verification doctrine)
 - Every `prospects.csv` row must keep a `source_url`. Never invent or "fix" phone
