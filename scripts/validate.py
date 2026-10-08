@@ -69,6 +69,9 @@ SECTION_ORDER = (S_LIVE, S_LEGACY, S_DATA)
 # Warning groups, printed in this order within a section.
 W_ORPHAN = "queued business has no exact prospects.csv match (orphan queue entry)"
 W_DNC_LEGACY = "entry is on outreach/do_not_contact.csv (blocked; legacy queue is not sent from)"
+W_DNC_TOWN = "name matches a town-scoped do-not-contact entry but the queued location differs (verify)"
+W_LOCATION = "queued location does not single out a prospects.csv row (verify)"
+W_MAYBE_DUP = "possible duplicate: a location unknown for this name may be the same place"
 W_MALFORMED = "malformed queue line"
 W_EMAIL = "malformed email"
 W_REQUEUE = "email or business previously queued on an earlier date (past file, not selected)"
@@ -79,7 +82,7 @@ W_PHONE = "phone not in (NNN) NNN-NNNN format"
 W_VOCAB = "value outside controlled vocabulary"
 W_README = "README lead count differs from prospects.csv"
 WARNING_ORDER = (
-    W_ORPHAN, W_DNC_LEGACY, W_MALFORMED, W_EMAIL, W_REQUEUE, W_UNDATED, W_QUEUE_LIKE,
+    W_ORPHAN, W_LOCATION, W_DNC_TOWN, W_MAYBE_DUP, W_DNC_LEGACY, W_MALFORMED, W_EMAIL, W_REQUEUE, W_UNDATED, W_QUEUE_LIKE,
     W_STATUS, W_PHONE, W_VOCAB, W_README,
 )
 
@@ -170,8 +173,9 @@ def split_location(business: str) -> tuple[str, str]:
 
 
 def row_locations(row: dict[str, str]) -> set[str]:
-    """Location words for a prospect row: first word of its town and of any name parenthetical."""
-    words = {first_word(row.get("town", ""))}
+    """Location words for a prospect row: first word of its town, of its region (usually the
+    county, e.g. 'Luzerne County PA'), and of any name parenthetical."""
+    words = {first_word(row.get("town", "")), first_word(row.get("region", ""))}
     _bare, paren = split_location(row["business_name"])
     words.add(paren)
     words.discard("")
@@ -276,17 +280,41 @@ class DoNotContact:
             return True
         return prefix_match(_core_key(candidate), _core_key(entry))
 
-    def reason(self, business_names: list[str], email: str = "", location: str = "") -> str | None:
+    def reason(
+        self,
+        business_names: list[str],
+        email: str = "",
+        location: str = "",
+        slug_words: set[str] | None = None,
+        row_towns: set[str] | None = None,
+    ) -> tuple[str, str] | None:
+        """Return ("error" | "warn", message) or None.
+
+        A town-scoped entry whose name matches is an error when the queued entry has no
+        location, the same location, a slug containing the town, or a name that resolves only
+        to prospect rows in that town (`row_towns`). Otherwise (location differs) it is a
+        warning, never a silent skip. Entries without a town, and emails, are always errors.
+        """
+        warning = None
         for entry in self.businesses:
+            if not any(self._matches(b, entry) for b in business_names):
+                continue
             town = self.towns.get(entry, "")
-            if town and location and location != town:
-                continue  # town-scoped entry, queued entry is somewhere else
-            if any(self._matches(b, entry) for b in business_names):
-                scope = f", town {town!r}" if town else ""
-                return f"business is on {DNC_LABEL} (matches {entry!r}{scope})"
+            if not town:
+                return "error", f"business is on {DNC_LABEL} (matches {entry!r})"
+            base = f"business is on {DNC_LABEL} (matches {entry!r}, town {town!r})"
+            if not location or location == town:
+                return "error", base
+            if slug_words and town in slug_words:
+                return "error", f"{base}; the slug names {town!r} although the location says {location!r}"
+            if row_towns and row_towns == {town}:
+                return "error", f"{base}; this name's only prospects.csv row(s) are in {town!r} although the location says {location!r}"
+            warning = warning or (
+                "warn", f"name matches {entry!r} (town {town!r}) on {DNC_LABEL}; queued location {location!r} differs"
+            )
         if email and name_key(strip_mailto(email)) in self.emails:
-            return f"email is on {DNC_LABEL}"
-        return None
+            return "error", f"email is on {DNC_LABEL}"
+        return warning
 
     def mentioned_in(self, text: str) -> str | None:
         """For unparseable lines: any listed email token, or a listed name as a substring."""
@@ -336,15 +364,26 @@ def check_against_prospects(
     the name, the queued location's first word picks the row(s); if it matches none,
     all rows are used (hard error only if every one is dropped).
     """
-    for name in names:
-        matches = by_key.get(name_key(name), [])
-        if len(matches) > 1 and location:
-            located = [p for p in matches if location in row_locations(p)]
-            matches = located or matches
-        if matches:
-            if all(p["priority"] == "drop" for p in matches):
-                report.error(f"{where}: queued business is marked priority=drop in prospects.csv", section)
+    all_rows, picked, mismatch = resolve_rows(names, location, by_key)
+    if all_rows:
+        if all(p["priority"] == "drop" for p in picked):
+            report.error(f"{where}: queued business is marked priority=drop in prospects.csv", section)
             return
+        dropped = [p for p in picked if p["priority"] == "drop"]
+        if mismatch or dropped:
+            if mismatch:
+                why = f"location {location!r} matches no row"
+            elif not location:
+                why = "no location given"
+            else:
+                why = f"location {location!r} matches several rows"
+            rows = "; ".join(
+                f"{p['business_name']} ({p['town']}, line {p['_line']})"
+                + (" [drop]" if p["priority"] == "drop" else "")
+                for p in picked
+            )
+            report.warn(W_LOCATION, f"{label}: {why}; candidate rows: {rows}", section)
+        return
     hints = near_matches(names[-1], prospects)
     if hints and all(p["priority"] == "drop" for p in hints):
         rows = "; ".join(f"{p['business_name']} (line {p['_line']})" for p in hints)
@@ -357,6 +396,24 @@ def check_against_prospects(
     else:
         suffix = " — no similar name"
     report.warn(W_ORPHAN, f"{label}{suffix}", section)
+
+
+def resolve_rows(
+    names: list[str], location: str, by_key: dict[str, list[dict[str, str]]]
+) -> tuple[list[dict[str, str]], list[dict[str, str]], bool]:
+    """Return (all rows for the name, rows the location picks, location_mismatch).
+
+    The location picks rows whose town/region/name-parenthetical first word equals it. If
+    it picks none (or there is no location), every row for the name is a candidate.
+    """
+    for name in names:
+        rows = by_key.get(name_key(name), [])
+        if rows:
+            if location:
+                located = [p for p in rows if location in row_locations(p)]
+                return rows, (located or rows), not located
+            return rows, rows, False
+    return [], [], False
 
 
 def index_prospects(prospects: list[dict[str, str]] | None) -> dict[str, list[dict[str, str]]]:
@@ -400,9 +457,14 @@ def check_manifest(
             report.warn(W_STATUS, f"{where}: status {m[MANIFEST_STATUS]!r}", S_LEGACY)
         m_bare, m_location = split_location(m["business"])
         m_names = [m["business"]] if m_bare == m["business"] else [m["business"], m_bare]
-        blocked = dnc.reason([*m_names, *slug_names(m["slug"])], location=m_location)
+        m_rows = resolve_rows(m_names, m_location, by_key)[0]
+        blocked = dnc.reason(
+            [*m_names, *slug_names(m["slug"])], location=m_location,
+            slug_words=set(m["slug"].split("-")),
+            row_towns={first_word(p["town"]) for p in m_rows},
+        )
         if blocked:
-            report.warn(W_DNC_LEGACY, f"{where}: {blocked}", S_LEGACY)
+            report.warn(W_DNC_LEGACY, f"{where}: {blocked[1]}", S_LEGACY)
         if prospects is not None:
             check_against_prospects(
                 m_names, f"{m['business']} (slug {m['slug']})", where,
@@ -463,10 +525,20 @@ class QueueState:
         self.dnc = dnc
         self.dropped = [p["business_name"] for p in prospects or [] if p["priority"] == "drop"]
         self.emails: dict[str, list[str]] = defaultdict(list)
-        # bare business key -> [(location word or '', where)]
-        self.businesses: dict[str, list[tuple[str, str]]] = defaultdict(list)
+        # bare business key -> [QueuedBusiness]
+        self.businesses: dict[str, list[QueuedBusiness]] = defaultdict(list)
         self.past_emails: dict[str, list[str]] = defaultdict(list)  # email -> ["date (file:line)"]
         self.past_businesses: dict[str, list[tuple[str, str]]] = defaultdict(list)
+
+
+class QueuedBusiness:
+    """One live-queue entry as seen by the duplicate check."""
+
+    def __init__(self, location: str, where: str, row_ids: frozenset[str], misleading: bool) -> None:
+        self.location = location      # first word of the queued "(Location)", or ''
+        self.where = where
+        self.row_ids = row_ids        # prospects.csv lines the entry resolves to
+        self.misleading = misleading  # location is not a known town/region/name-location
 
 
 def same_place(loc_a: str, loc_b: str) -> bool:
@@ -548,11 +620,21 @@ def check_live_queue(path: Path, state: QueueState, report: Report) -> int:
             for past_loc, earlier in state.past_businesses.get(bare_key, []):
                 if same_place(location, past_loc):
                     report.warn(W_REQUEUE, f"{where}: business {bare_key!r} previously queued on {earlier}", S_LIVE)
-        state.businesses[bare_key].append((location, where))
-        blocked = state.dnc.reason(names + ([] if is_email else slug_names(first)),
-                                   first if is_email else "", location)
-        if blocked:
-            report.error(f"{where}: {blocked}", S_LIVE)
+        all_rows, picked, mismatch = resolve_rows(names, location, state.by_key)
+        state.businesses[bare_key].append(QueuedBusiness(
+            location, where, frozenset(p["_line"] for p in picked), bool(location) and mismatch,
+        ))
+        blocked = state.dnc.reason(
+            names + ([] if is_email else slug_names(first)),
+            first if is_email else "",
+            location,
+            slug_words=set() if is_email else set(first.split("-")),
+            row_towns={first_word(p["town"]) for p in all_rows},
+        )
+        if blocked and blocked[0] == "error":
+            report.error(f"{where}: {blocked[1]}", S_LIVE)
+        elif blocked:
+            report.warn(W_DNC_TOWN, f"{where}: {blocked[1]}", S_LIVE)
         if state.prospects is not None:
             check_against_prospects(names, f"{business} [{label}:{lineno}]", where,
                                     state.prospects, state.by_key, report, S_LIVE, location)
@@ -568,19 +650,44 @@ def report_live_duplicates(state: QueueState, report: Report) -> None:
     for key, entries in state.businesses.items():
         if len(entries) < 2:
             continue
-        if any(not loc for loc, _ in entries):
-            places = [w for _, w in entries]
+        if any(not e.location for e in entries):
+            places = [e.where for e in entries]
             report.error(f"duplicate business {key!r} queued {len(places)}x: " + "; ".join(places), S_LIVE)
             continue
         by_loc: dict[str, list[str]] = defaultdict(list)
-        for loc, where in entries:
-            by_loc[loc].append(where)
+        for e in entries:
+            by_loc[e.location].append(e.where)
         for loc, places in by_loc.items():
             if len(places) > 1:
                 report.error(
                     f"duplicate business {key!r} at {loc!r} queued {len(places)}x: " + "; ".join(places),
                     S_LIVE,
                 )
+        # A location that is not a known town/region/name-location for this name is resolved
+        # to the name's prospect rows before comparing.
+        for i, a in enumerate(entries):
+            for b in entries[i + 1:]:
+                if a.location == b.location or not (a.misleading or b.misleading):
+                    continue
+                shared = a.row_ids & b.row_ids
+                if not shared:
+                    continue
+                odd = a if a.misleading else b
+                if len(a.row_ids) == 1 and a.row_ids == b.row_ids:
+                    report.error(
+                        f"duplicate business {key!r}: {a.where} and {b.where} both resolve to "
+                        f"prospects.csv line {next(iter(shared))} (location {odd.location!r} is not "
+                        "a known location for this name)",
+                        S_LIVE,
+                    )
+                else:
+                    lines = ", ".join(sorted(shared, key=int))
+                    report.warn(
+                        W_MAYBE_DUP,
+                        f"{a.where} and {b.where}: location {odd.location!r} is not a known location "
+                        f"for {key!r}; both could be prospects.csv line(s) {lines}",
+                        S_LIVE,
+                    )
 
 
 def check_drafts(outreach_dir: Path, report: Report) -> list[Path]:

@@ -315,10 +315,12 @@ class QueueHelpers(FixtureCase):
             "business,email,reason,added\n" + rows, encoding="utf-8"
         )
 
-    def add_prospect(self, name: str, priority: str = "B", town: str = "Testville") -> None:
+    def add_prospect(
+        self, name: str, priority: str = "B", town: str = "Testville", region: str = "Test County NY"
+    ) -> None:
         self.append(
             "prospects.csv",
-            f"{name},pizza & takeout,{town},Test County NY,(555) 010-0009,,no,high,"
+            f"{name},pizza & takeout,{town},{region},(555) 010-0009,,no,high,"
             f"independent,https://extra.example/,{priority},fixture row",
         )
 
@@ -665,7 +667,8 @@ class LocationAwareTest(QueueHelpers):
         self.add("h@hometown.example | Hometown Pizzeria (Ithaca) | x | y")
         code, out = run(self.repo)
         self.assertEqual(code, 0, out)
-        self.assertNotIn("Hometown", out)
+        self.assertIn(f"[1] {validate.W_LOCATION}:", out)
+        self.assertIn("location 'ithaca' matches no row", out)
 
     def test_unknown_location_with_all_rows_dropped_is_hard_error(self) -> None:
         self.hometown_rows(canastota="drop", groton="drop")
@@ -725,6 +728,131 @@ class LocationAwareTest(QueueHelpers):
         (self.repo / "outreach" / "do_not_contact.csv").write_text(
             "business,email,town,reason,added\n" + rows, encoding="utf-8"
         )
+
+
+class MisleadingLocationTest(QueueHelpers):
+    """Round-3 review: a missing or misleading location must not hide a problem."""
+
+    def dnc_town(self, rows: str) -> None:
+        (self.repo / "outreach" / "do_not_contact.csv").write_text(
+            "business,email,town,reason,added\n" + rows, encoding="utf-8"
+        )
+
+    def hometown(self) -> None:
+        self.add_prospect("Hometown Pizzeria", priority="drop", town="Canastota", region="Madison County NY")
+        self.add_prospect("Hometown Pizzeria (Groton)", priority="A", town="Groton", region="Tompkins County NY")
+
+    def nirchis(self) -> None:
+        self.add_prospect("Nirchi's Pizza (Downtown)", priority="drop", town="Binghamton", region="Broome County NY")
+        self.add_prospect("Nirchi's Pizza (Upper Front St)", town="Binghamton", region="Broome County NY")
+
+    def assertLocationWarning(self, *needles: str) -> str:
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"[1] {validate.W_LOCATION}:", out)
+        for n in needles:
+            self.assertIn(n, out)
+        return out
+
+    # 1. ambiguous name with a dropped row / single-row town mismatch
+    def test_ambiguous_name_without_location_warns_about_drop_row(self) -> None:
+        self.hometown()
+        self.add("h@hometown.example | Hometown Pizzeria | x | y")
+        self.assertLocationWarning("no location given", "Hometown Pizzeria (Canastota, line 5) [drop]")
+
+    def test_ambiguous_name_with_unknown_location_warns_about_drop_row(self) -> None:
+        self.hometown()
+        self.add("h@hometown.example | Hometown Pizzeria (Elmira) | x | y")
+        self.assertLocationWarning("location 'elmira' matches no row", "Hometown Pizzeria (Canastota, line 5) [drop]")
+
+    def test_location_matching_several_rows_warns_about_drop_row(self) -> None:
+        self.nirchis()
+        self.add("n@nirchis.example | Nirchi's Pizza (Binghamton) | x | y")
+        self.assertLocationWarning(
+            "location 'binghamton' matches several rows", "Nirchi's Pizza (Downtown) (Binghamton, line 5) [drop]"
+        )
+
+    def test_branch_name_without_location_warns_about_drop_row(self) -> None:
+        self.nirchis()
+        self.add("n@nirchis.example | Nirchi's Pizza | x | y")
+        self.assertLocationWarning("no location given", "[drop]")
+
+    def test_single_row_town_mismatch_warns(self) -> None:
+        self.add_prospect("Mario's Pizza", town="Owego", region="Tioga County NY")
+        self.add("m@marios.example | Mario's Pizza (Elmira) | x | y")
+        self.assertLocationWarning("location 'elmira' matches no row; candidate rows: Mario's Pizza (Owego, line 5)")
+
+    def test_county_location_is_accepted(self) -> None:
+        self.add_prospect("Mario's Pizza", town="Owego", region="Tioga County NY")
+        self.add("m@marios.example | Mario's Pizza (Tioga NY) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn(validate.W_LOCATION, out)
+
+    # 2. town-scoped do-not-contact with a misleading location
+    def test_dnc_town_name_resolving_only_to_that_town_is_hard_error(self) -> None:
+        self.dnc_town("Joey's Pizza,,Dunmore,closed,2026-10-08\n")
+        self.add_prospect("Joey's Pizza", town="Dunmore", region="Northern PA")
+        self.add("j@joeys.example | Joey's Pizza (Scranton) | x | y")
+        self.assertHardFailure("this name's only prospects.csv row(s) are in 'dunmore' although the location says 'scranton'")
+
+    def test_dnc_town_in_slug_is_hard_error(self) -> None:
+        self.dnc_town("Joey's Pizza,,Dunmore,closed,2026-10-08\n")
+        self.add("joeys-pizza-dunmore | Joey's Pizza (Scranton) | x | y")
+        self.assertHardFailure("the slug names 'dunmore' although the location says 'scranton'")
+
+    def test_dnc_town_other_location_warns_instead_of_silent_skip(self) -> None:
+        self.dnc_town("Joey's Pizza,,Dunmore,closed,2026-10-08\n")
+        self.add("j@joeys.example | Joey's Pizza (Scranton) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"[1] {validate.W_DNC_TOWN}:", out)
+        self.assertIn("queued location 'scranton' differs", out)
+
+    def test_dnc_town_other_business_in_other_town_still_passes(self) -> None:
+        self.dnc_town("Joey's Pizza,,Dunmore,closed,2026-10-08\n")
+        self.add_prospect("Joey's Pizza", town="Dunmore", region="Northern PA")
+        self.add_prospect("Joey's Pizzeria", town="Rome", region="Oneida County NY")
+        self.add("j@joeysrome.example | Joey's Pizzeria (Rome NY) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("ERRORS", out)
+
+    # 3. misleading location vs the duplicate check
+    def test_misleading_location_resolving_to_same_row_is_duplicate(self) -> None:
+        self.add_prospect("Joey's Pizza", town="Dunmore", region="Northern PA")
+        self.add("a@joeys.example | Joey's Pizza (Dunmore PA) | x | y")
+        self.add("b@joeys.example | Joey's Pizza (Scranton PA) | x | y")
+        self.assertHardFailure("both resolve to prospects.csv line 5 (location 'scranton' is not a known location")
+
+    def test_misleading_location_with_several_rows_warns(self) -> None:
+        self.add_prospect("Nirchi's Pizza (Downtown)", town="Binghamton", region="Broome County NY")
+        self.add_prospect("Nirchi's Pizza (Upper Front St)", town="Binghamton", region="Broome County NY")
+        self.add("a@nirchis.example | Nirchi's Pizza (Downtown) | x | y")
+        self.add("b@nirchis.example | Nirchi's Pizza (Elmira) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"[1] {validate.W_MAYBE_DUP}:", out)
+        self.assertIn("location 'elmira' is not a known location for \"nirchi's pizza\"", out)
+
+    def test_real_branches_do_not_collide(self) -> None:
+        self.add_prospect("Hometown Pizzeria", town="Canastota", region="Madison County NY")
+        self.add_prospect("Hometown Pizzeria (Groton)", town="Groton", region="Tompkins County NY")
+        self.add_prospect("Nirchi's Pizza (Downtown)", town="Binghamton", region="Broome County NY")
+        self.add_prospect("Nirchi's Pizza (Upper Front St)", town="Binghamton", region="Broome County NY")
+        self.add_prospect("Spiedie & Rib Pit (Upper Front St)", town="Binghamton", region="Broome County NY")
+        self.add_prospect("Spiedie & Rib Pit (Vestal)", town="Vestal", region="Broome County NY")
+        for i, name in enumerate([
+            "Hometown Pizzeria (Canastota)", "Hometown Pizzeria (Groton)",
+            "Nirchi's Pizza (Downtown)", "Nirchi's Pizza (Upper Front St)",
+            "Spiedie & Rib Pit (Upper Front St)", "Spiedie & Rib Pit (Vestal)",
+        ]):
+            self.add(f"x{i}@example.com | {name} | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("duplicate", out)
+        self.assertNotIn(validate.W_MAYBE_DUP, out)
+        self.assertNotIn(validate.W_LOCATION, out)
 
 
 class WarningFixtureTest(FixtureCase):

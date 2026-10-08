@@ -4,6 +4,9 @@
   The format is one entry per line: `email | Business (Location) | source note | status note`.
   Lines starting with `#` are headers or comments. The first field can be a slug instead of
   an email while the email is still being found.
+  Use the prospect's town (or county) as the `(Location)`. A location that matches no
+  `prospects.csv` row for that name is reported, because it can hide a dropped branch,
+  a do-not-contact town or a duplicate.
 - **Legacy queue:** `outreach/manifest.csv`. It hasn't been updated since commit 30aa821
   (2026-10-06) and isn't sent from. Its rows are kept for history; don't delete or reorder them.
 - **Do-not-contact:** `outreach/do_not_contact.csv` (`business,email,town,reason,added`).

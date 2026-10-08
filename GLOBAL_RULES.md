@@ -21,6 +21,8 @@ Changes are mostly to CSV data, queue text files and Markdown documents.
   File names are matched case-insensitively. Across the checked files, the same email is a
   hard duplicate; so is the same business unless both entries name different locations
   (first word of the `(Location)`: `(Dunmore PA)` = `(Dunmore)`, `(Groton)` ≠ `(Canastota)`).
+  The `(Location)` should be the prospect's town or county; one that matches no row for the
+  name is warned about and, for duplicates, resolved to that name's prospect rows.
 - `outreach/do_not_contact.csv` — `business,email,town,reason,added`. Matching is conservative
   (normalized name, prefix either way, generic words like "pizza"/"restaurant" ignored, slug,
   email). An optional `town` limits a business entry to queued entries in that town or with no
