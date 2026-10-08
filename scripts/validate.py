@@ -71,7 +71,7 @@ W_ORPHAN = "queued business has no exact prospects.csv match (orphan queue entry
 W_DNC_LEGACY = "entry is on outreach/do_not_contact.csv (blocked; legacy queue is not sent from)"
 W_DNC_TOWN = "name matches a town-scoped do-not-contact entry but the queued location differs (verify)"
 W_LOCATION = "queued location does not single out a prospects.csv row (verify)"
-W_MAYBE_DUP = "possible duplicate: a location unknown for this name may be the same place"
+W_MAYBE_DUP = "possible duplicate: different locations resolve to overlapping prospects.csv rows"
 W_MALFORMED = "malformed queue line"
 W_EMAIL = "malformed email"
 W_REQUEUE = "email or business previously queued on an earlier date (past file, not selected)"
@@ -291,9 +291,10 @@ class DoNotContact:
         """Return ("error" | "warn", message) or None.
 
         A town-scoped entry whose name matches is an error when the queued entry has no
-        location, the same location, a slug containing the town, or a name that resolves only
-        to prospect rows in that town (`row_towns`). Otherwise (location differs) it is a
-        warning, never a silent skip. Entries without a town, and emails, are always errors.
+        location, the same location, a slug containing the town, or a location that resolves
+        to any prospect row in that town (`row_towns` = towns of the rows the location picked,
+        e.g. a county). Otherwise (location differs) it is a warning, never a silent skip.
+        Entries without a town, and emails, are always errors.
         """
         warning = None
         for entry in self.businesses:
@@ -307,8 +308,8 @@ class DoNotContact:
                 return "error", base
             if slug_words and town in slug_words:
                 return "error", f"{base}; the slug names {town!r} although the location says {location!r}"
-            if row_towns and row_towns == {town}:
-                return "error", f"{base}; this name's only prospects.csv row(s) are in {town!r} although the location says {location!r}"
+            if row_towns and town in row_towns:
+                return "error", f"{base}; the queued location {location!r} resolves to prospects.csv row(s) in {town!r}"
             warning = warning or (
                 "warn", f"name matches {entry!r} (town {town!r}) on {DNC_LABEL}; queued location {location!r} differs"
             )
@@ -457,7 +458,7 @@ def check_manifest(
             report.warn(W_STATUS, f"{where}: status {m[MANIFEST_STATUS]!r}", S_LEGACY)
         m_bare, m_location = split_location(m["business"])
         m_names = [m["business"]] if m_bare == m["business"] else [m["business"], m_bare]
-        m_rows = resolve_rows(m_names, m_location, by_key)[0]
+        m_rows = resolve_rows(m_names, m_location, by_key)[1]
         blocked = dnc.reason(
             [*m_names, *slug_names(m["slug"])], location=m_location,
             slug_words=set(m["slug"].split("-")),
@@ -620,7 +621,7 @@ def check_live_queue(path: Path, state: QueueState, report: Report) -> int:
             for past_loc, earlier in state.past_businesses.get(bare_key, []):
                 if same_place(location, past_loc):
                     report.warn(W_REQUEUE, f"{where}: business {bare_key!r} previously queued on {earlier}", S_LIVE)
-        all_rows, picked, mismatch = resolve_rows(names, location, state.by_key)
+        _rows, picked, mismatch = resolve_rows(names, location, state.by_key)
         state.businesses[bare_key].append(QueuedBusiness(
             location, where, frozenset(p["_line"] for p in picked), bool(location) and mismatch,
         ))
@@ -629,7 +630,7 @@ def check_live_queue(path: Path, state: QueueState, report: Report) -> int:
             first if is_email else "",
             location,
             slug_words=set() if is_email else set(first.split("-")),
-            row_towns={first_word(p["town"]) for p in all_rows},
+            row_towns={first_word(p["town"]) for p in picked},
         )
         if blocked and blocked[0] == "error":
             report.error(f"{where}: {blocked[1]}", S_LIVE)
@@ -663,29 +664,36 @@ def report_live_duplicates(state: QueueState, report: Report) -> None:
                     f"duplicate business {key!r} at {loc!r} queued {len(places)}x: " + "; ".join(places),
                     S_LIVE,
                 )
-        # A location that is not a known town/region/name-location for this name is resolved
-        # to the name's prospect rows before comparing.
+        # Different location words can still be one place (a town and its county, or an
+        # unknown location that falls back to all of the name's rows): compare the rows each
+        # location resolves to.
         for i, a in enumerate(entries):
             for b in entries[i + 1:]:
-                if a.location == b.location or not (a.misleading or b.misleading):
+                if a.location == b.location:
                     continue
                 shared = a.row_ids & b.row_ids
                 if not shared:
                     continue
-                odd = a if a.misleading else b
+                odd = a if a.misleading else b if b.misleading else None
+                why = (
+                    f"location {odd.location!r} is not a known location for this name" if odd
+                    else f"locations {a.location!r} and {b.location!r} both match it"
+                )
                 if len(a.row_ids) == 1 and a.row_ids == b.row_ids:
                     report.error(
                         f"duplicate business {key!r}: {a.where} and {b.where} both resolve to "
-                        f"prospects.csv line {next(iter(shared))} (location {odd.location!r} is not "
-                        "a known location for this name)",
+                        f"prospects.csv line {next(iter(shared))} ({why})",
                         S_LIVE,
                     )
                 else:
                     lines = ", ".join(sorted(shared, key=int))
+                    detail = (
+                        f"location {odd.location!r} is not a known location for {key!r}" if odd
+                        else f"locations {a.location!r} and {b.location!r} overlap for {key!r}"
+                    )
                     report.warn(
                         W_MAYBE_DUP,
-                        f"{a.where} and {b.where}: location {odd.location!r} is not a known location "
-                        f"for {key!r}; both could be prospects.csv line(s) {lines}",
+                        f"{a.where} and {b.where}: {detail}; both could be prospects.csv line(s) {lines}",
                         S_LIVE,
                     )
 

@@ -794,7 +794,7 @@ class MisleadingLocationTest(QueueHelpers):
         self.dnc_town("Joey's Pizza,,Dunmore,closed,2026-10-08\n")
         self.add_prospect("Joey's Pizza", town="Dunmore", region="Northern PA")
         self.add("j@joeys.example | Joey's Pizza (Scranton) | x | y")
-        self.assertHardFailure("this name's only prospects.csv row(s) are in 'dunmore' although the location says 'scranton'")
+        self.assertHardFailure("the queued location 'scranton' resolves to prospects.csv row(s) in 'dunmore'")
 
     def test_dnc_town_in_slug_is_hard_error(self) -> None:
         self.dnc_town("Joey's Pizza,,Dunmore,closed,2026-10-08\n")
@@ -853,6 +853,105 @@ class MisleadingLocationTest(QueueHelpers):
         self.assertNotIn("duplicate", out)
         self.assertNotIn(validate.W_MAYBE_DUP, out)
         self.assertNotIn(validate.W_LOCATION, out)
+
+
+class CountyLocationTest(QueueHelpers):
+    """Round-4 review: a county must not hide a duplicate or downgrade a do-not-contact hit."""
+
+    def rows(self) -> None:
+        self.add_prospect("Joey's Pizza", town="Dunmore", region="Northern PA")
+        self.add_prospect("Hometown Pizzeria", town="Canastota", region="Madison County NY")
+        self.add_prospect("Hometown Pizzeria (Groton)", town="Groton", region="Tompkins County NY")
+        self.add_prospect("Aldo's Pizzeria & Restaurant", town="Wilkes-Barre", region="Luzerne County PA")
+        self.add_prospect("Nirchi's Pizza (Downtown)", town="Binghamton", region="Broome County NY")
+        self.add_prospect("Nirchi's Pizza (Upper Front St)", town="Binghamton", region="Broome County NY")
+        self.add_prospect("Spiedie & Rib Pit (Upper Front St)", town="Binghamton", region="Broome County NY")
+        self.add_prospect("Spiedie & Rib Pit (Vestal)", town="Vestal", region="Broome County NY")
+
+    def pair(self, first: str, second: str) -> tuple[int, str]:
+        self.rows()
+        self.add(f"one@example.com | {first} | x | y")
+        self.add(f"two@example.com | {second} | x | y")
+        return run(self.repo)
+
+    def assertSameRowDuplicate(self, first: str, second: str, needle: str) -> None:
+        code, out = self.pair(first, second)
+        self.assertEqual(code, 1, out)
+        self.assertIn("both resolve to prospects.csv line", out)
+        self.assertIn(needle, out)
+
+    def assertPossibleDuplicate(self, first: str, second: str) -> None:
+        code, out = self.pair(first, second)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"[1] {validate.W_MAYBE_DUP}:", out)
+
+    # 1. town vs county duplicates
+    def test_town_and_region_joeys_is_duplicate(self) -> None:
+        self.assertSameRowDuplicate("Joey's Pizza (Dunmore PA)", "Joey's Pizza (Northern PA)",
+                                    "locations 'dunmore' and 'northern' both match it")
+
+    def test_town_and_county_hometown_groton_is_duplicate(self) -> None:
+        self.assertSameRowDuplicate("Hometown Pizzeria (Groton)", "Hometown Pizzeria (Tompkins)",
+                                    "locations 'groton' and 'tompkins' both match it")
+
+    def test_town_and_county_aldos_is_duplicate(self) -> None:
+        self.assertSameRowDuplicate("Aldo's Pizzeria & Restaurant (Wilkes-Barre PA)",
+                                    "Aldo's Pizzeria & Restaurant (Luzerne PA)",
+                                    "locations 'wilkes' and 'luzerne' both match it")
+
+    def test_branch_and_county_nirchis_is_possible_duplicate(self) -> None:
+        self.assertPossibleDuplicate("Nirchi's Pizza (Downtown)", "Nirchi's Pizza (Broome)")
+
+    def test_town_and_county_nirchis_is_possible_duplicate(self) -> None:
+        self.assertPossibleDuplicate("Nirchi's Pizza (Binghamton)", "Nirchi's Pizza (Broome)")
+
+    def assertNoCollision(self, first: str, second: str) -> None:
+        code, out = self.pair(first, second)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("duplicate", out)
+        self.assertNotIn(validate.W_MAYBE_DUP, out)
+
+    def test_hometown_canastota_and_groton_do_not_collide(self) -> None:
+        self.assertNoCollision("Hometown Pizzeria (Canastota)", "Hometown Pizzeria (Groton)")
+
+    def test_nirchis_downtown_and_upper_front_do_not_collide(self) -> None:
+        self.assertNoCollision("Nirchi's Pizza (Downtown)", "Nirchi's Pizza (Upper Front St)")
+
+    def test_spiedie_upper_front_and_vestal_do_not_collide(self) -> None:
+        self.assertNoCollision("Spiedie & Rib Pit (Upper Front St)", "Spiedie & Rib Pit (Vestal)")
+
+    # 2. county vs town-scoped do-not-contact
+    def dnc_town(self, rows: str) -> None:
+        (self.repo / "outreach" / "do_not_contact.csv").write_text(
+            "business,email,town,reason,added\n" + rows, encoding="utf-8"
+        )
+
+    def test_county_resolving_to_dnc_town_is_hard_error(self) -> None:
+        self.rows()
+        self.dnc_town("Hometown Pizzeria,,Groton,closed,2026-10-08\n")
+        self.add("h@hometown.example | Hometown Pizzeria (Tompkins) | x | y")
+        self.assertHardFailure(
+            "(Hometown Pizzeria (Tompkins)): business is on outreach/do_not_contact.csv "
+            "(matches 'Hometown Pizzeria', town 'groton'); the queued location 'tompkins' "
+            "resolves to prospects.csv row(s) in 'groton'"
+        )
+
+    def test_county_of_other_branch_is_only_a_warning(self) -> None:
+        self.rows()
+        self.dnc_town("Hometown Pizzeria,,Groton,closed,2026-10-08\n")
+        self.add("h@hometown.example | Hometown Pizzeria (Madison) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"[1] {validate.W_DNC_TOWN}:", out)
+
+    def test_other_business_in_other_town_still_passes(self) -> None:
+        self.rows()
+        self.add_prospect("Joey's Pizzeria", town="Rome", region="Oneida County NY")
+        self.dnc_town("Joey's Pizza,,Dunmore,closed,2026-10-08\n")
+        self.add("j@joeysrome.example | Joey's Pizzeria (Rome NY) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("ERRORS", out)
 
 
 class WarningFixtureTest(FixtureCase):
