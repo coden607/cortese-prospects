@@ -6,12 +6,14 @@
   an email while the email is still being found.
 - **Legacy queue:** `outreach/manifest.csv`. It hasn't been updated since commit 30aa821
   (2026-10-06) and isn't sent from. Its rows are kept for history; don't delete or reorder them.
-- **Do-not-contact:** `outreach/do_not_contact.csv` (`business,email,reason,added`).
+- **Do-not-contact:** `outreach/do_not_contact.csv` (`business,email,town,reason,added`).
   Any live queue entry that matches it by business name or email is a hard validation error.
   Matching is deliberately broad: case, accents, apostrophes, a leading "The", a
   "(Location)" suffix, generic words such as "Pizza" or "Restaurant", and prefixes in either
   direction are all ignored. A name with an extra word in the middle can still slip through,
-  so list every name variant you know. Only Stephen adds rows.
+  so list every name variant you know. Fill `town` only to limit an entry to one location
+  (e.g. one closed branch of a name used elsewhere); an empty town blocks the name everywhere.
+  Only Stephen adds rows.
 
 Check before sending: `python3 scripts/validate.py` (live queues dated today or later) or
 `python3 scripts/validate.py --all-queues`.

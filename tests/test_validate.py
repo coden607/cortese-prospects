@@ -196,19 +196,29 @@ class NameNormalizationTest(FixtureCase):
         self.assertHardFailure("(Gamma   Diner): queued business is marked priority=drop")
 
     def test_near_match_to_drop_row_is_hard_error(self) -> None:
-        self.queue("Gamma Diner (Testville)")
+        self.queue("Gamma Diners of Testville")
         out = self.assertHardFailure("queued business near-matches a dropped prospect: Gamma Diner (line 4)")
         self.assertNotIn(validate.W_ORPHAN, out)
+
+    def test_location_suffix_on_legacy_manifest_matches_drop_row(self) -> None:
+        self.queue("Gamma Diner (Testville)")
+        self.assertHardFailure("(Gamma Diner (Testville)): queued business is marked priority=drop")
 
     def test_near_match_with_suffix_to_drop_row_is_hard_error(self) -> None:
         self.queue("Gamma Diner of Testville")
         self.assertHardFailure("(Gamma Diner of Testville): queued business near-matches a dropped prospect")
 
     def test_near_match_to_active_row_stays_warning(self) -> None:
+        self.queue("Alpha Pizza of Testville", slug="alpha-two")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIn("Alpha Pizza of Testville (slug alpha-two) — possible near-match, verify: Alpha Pizza", out)
+
+    def test_location_suffix_on_legacy_manifest_matches_active_row(self) -> None:
         self.queue("Alpha Pizza (Testville)", slug="alpha-two")
         code, out = run(self.repo)
         self.assertEqual(code, 0, out)
-        self.assertIn("Alpha Pizza (Testville) (slug alpha-two) — possible near-match, verify: Alpha Pizza", out)
+        self.assertNotIn(validate.W_ORPHAN, out)
 
     def test_duplicate_business_case_variant(self) -> None:
         self.queue("alpha  PIZZA ", slug="alpha-two")
@@ -305,10 +315,10 @@ class QueueHelpers(FixtureCase):
             "business,email,reason,added\n" + rows, encoding="utf-8"
         )
 
-    def add_prospect(self, name: str, priority: str = "B") -> None:
+    def add_prospect(self, name: str, priority: str = "B", town: str = "Testville") -> None:
         self.append(
             "prospects.csv",
-            f"{name},pizza & takeout,Testville,Test County NY,(555) 010-0009,,no,high,"
+            f"{name},pizza & takeout,{town},Test County NY,(555) 010-0009,,no,high,"
             f"independent,https://extra.example/,{priority},fixture row",
         )
 
@@ -406,8 +416,8 @@ class LiveQueueTest(QueueHelpers):
         self.assertHardFailure("duplicate email 'alpha@alpha.example' queued 2x")
 
     def test_duplicate_business_in_same_file_is_hard_error(self) -> None:
-        self.add("other@beta.example | BETA  wings (Elsewhere) | x | y")
-        self.assertHardFailure("duplicate business 'beta wings' queued 2x")
+        self.add("other@beta.example | BETA  wings (Testville NY) | x | y")
+        self.assertHardFailure("duplicate business 'beta wings' at 'testville' queued 2x")
 
     def test_duplicate_across_selected_files_is_hard_error(self) -> None:
         (self.repo / "outreach" / "queue-2026-01-02.txt").write_text(
@@ -599,6 +609,122 @@ class ReviewFixesTest(QueueHelpers):
         self.assertEqual(code, 0, out)
         self.assertIn("Gamma Italian Diner [outreach/queue-2026-01-01.txt:4] — no similar name", out)
 
+
+
+class LocationAwareTest(QueueHelpers):
+    """Same bare name in different towns: duplicates, prospect rows and do-not-contact."""
+
+    def hometown_rows(self, canastota: str = "B", groton: str = "A") -> None:
+        self.add_prospect("Hometown Pizzeria", priority=canastota, town="Canastota")
+        self.add_prospect("Hometown Pizzeria (Groton)", priority=groton, town="Groton")
+
+    def test_same_name_different_towns_is_not_duplicate(self) -> None:
+        self.hometown_rows()
+        self.add("h1@hometown.example | Hometown Pizzeria (Canastota) | x | y")
+        self.add("h2@hometown.example | Hometown Pizzeria (Groton NY) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("duplicate", out)
+        self.assertNotIn("Hometown Pizzeria (", out.split("WARNINGS")[-1] if "WARNINGS" in out else "")
+
+    def test_branch_locations_with_separate_emails_are_not_duplicate(self) -> None:
+        self.add_prospect("Nirchi's Pizza (Downtown)", town="Binghamton")
+        self.add_prospect("Nirchi's Pizza (Upper Front St)", town="Binghamton")
+        self.add("n1@nirchis.example | Nirchi's Pizza (Downtown) | x | y")
+        self.add("n2@nirchis.example | Nirchi's Pizza (Upper Front St) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("duplicate", out)
+        self.assertNotIn(validate.W_ORPHAN, out)
+
+    def test_same_town_spelled_differently_is_duplicate(self) -> None:
+        self.add("j1@joeys.example | Joey's Pizza (Dunmore PA) | x | y")
+        self.add("j2@joeys.example | Joey's Pizza (Dunmore) | x | y")
+        self.assertHardFailure("duplicate business \"joey's pizza\" at 'dunmore' queued 2x")
+
+    def test_same_email_in_different_towns_is_still_duplicate(self) -> None:
+        self.add("h@hometown.example | Hometown Pizzeria (Canastota) | x | y")
+        self.add("h@hometown.example | Hometown Pizzeria (Groton) | x | y")
+        out = self.assertHardFailure("duplicate email 'h@hometown.example' queued 2x")
+        self.assertNotIn("duplicate business", out)
+
+    def test_location_picks_the_dropped_row(self) -> None:
+        self.hometown_rows(canastota="drop", groton="A")
+        self.add("h@hometown.example | Hometown Pizzeria (Canastota) | x | y")
+        self.assertHardFailure("(Hometown Pizzeria (Canastota)): queued business is marked priority=drop")
+
+    def test_location_picks_the_active_row(self) -> None:
+        self.hometown_rows(canastota="drop", groton="A")
+        self.add("h@hometown.example | Hometown Pizzeria (Groton NY) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("Hometown", out)
+
+    def test_unknown_location_falls_back_to_all_rows(self) -> None:
+        self.hometown_rows(canastota="drop", groton="A")
+        self.add("h@hometown.example | Hometown Pizzeria (Ithaca) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("Hometown", out)
+
+    def test_unknown_location_with_all_rows_dropped_is_hard_error(self) -> None:
+        self.hometown_rows(canastota="drop", groton="drop")
+        self.add("h@hometown.example | Hometown Pizzeria (Ithaca) | x | y")
+        self.assertHardFailure("(Hometown Pizzeria (Ithaca)): queued business is marked priority=drop")
+
+    def test_town_scoped_do_not_contact_spares_other_towns(self) -> None:
+        self.dnc_town("Joey's Pizza,,Dunmore,closed,2026-10-08\n")
+        self.add("j@joeysrome.example | Joey's Pizzeria (Rome) | x | y")
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("do_not_contact.csv (matches", out)
+
+    def test_town_scoped_do_not_contact_blocks_its_town(self) -> None:
+        self.dnc_town("Joey's Pizza,,Dunmore,closed,2026-10-08\n")
+        self.add("j@joeys.example | Joey's Pizza (Dunmore PA) | x | y")
+        self.assertHardFailure(
+            "(Joey's Pizza (Dunmore PA)): business is on outreach/do_not_contact.csv "
+            "(matches \"Joey's Pizza\", town 'dunmore')"
+        )
+
+    def test_town_scoped_do_not_contact_blocks_entry_without_location(self) -> None:
+        self.dnc_town("Joey's Pizza,,Dunmore,closed,2026-10-08\n")
+        self.add("j@joeys.example | Joey's Pizzeria | x | y")
+        self.assertHardFailure("(Joey's Pizzeria): business is on outreach/do_not_contact.csv")
+
+    def test_town_scoped_do_not_contact_email_blocks_anywhere(self) -> None:
+        self.dnc_town("Joey's Pizza,j@joeys.example,Dunmore,STOP reply,2026-10-08\n")
+        self.add("j@joeys.example | Joey's Pizzeria (Rome) | x | y")
+        self.assertHardFailure("(Joey's Pizzeria (Rome)): email is on outreach/do_not_contact.csv")
+
+    def test_empty_town_keeps_broad_matching(self) -> None:
+        self.dnc_town("Joey's Pizza,,,closed,2026-10-08\n")
+        self.add("j@joeysrome.example | Joey's Pizzeria (Rome) | x | y")
+        self.assertHardFailure("(Joey's Pizzeria (Rome)): business is on outreach/do_not_contact.csv")
+
+    def test_past_business_requeue_warns(self) -> None:
+        (self.repo / "outreach" / "queue-2025-12-31.txt").write_text(
+            "old@alpha.example | Alpha Pizza (Testville) | x | sent\n", encoding="utf-8"
+        )
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"[1] {validate.W_REQUEUE}:", out)
+        self.assertIn(
+            "business 'alpha pizza' previously queued on 2025-12-31 (outreach/queue-2025-12-31.txt:1)", out
+        )
+
+    def test_past_business_in_other_town_does_not_warn(self) -> None:
+        (self.repo / "outreach" / "queue-2025-12-31.txt").write_text(
+            "old@alpha.example | Alpha Pizza (Elsewhere) | x | sent\n", encoding="utf-8"
+        )
+        code, out = run(self.repo)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn(validate.W_REQUEUE, out)
+
+    def dnc_town(self, rows: str) -> None:
+        (self.repo / "outreach" / "do_not_contact.csv").write_text(
+            "business,email,town,reason,added\n" + rows, encoding="utf-8"
+        )
 
 
 class WarningFixtureTest(FixtureCase):
