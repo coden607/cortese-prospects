@@ -6,15 +6,32 @@ Project instructions in `AGENTS.md` still apply; this file adds factory specific
 ## What this repo is
 A sales-pipeline **data + content** repo for Cortese Digital's busy-line /
 missed-call recovery offer for independent restaurants. There is no
-application code, no package manifest, no build, and (as of 2026-10-07) no
-test suite or CI. Changes are to CSV data and Markdown documents.
+application code, no package manifest, no build, and no CI. Validation is a
+stdlib Python checker (`scripts/validate.py`) with a unittest suite (`tests/`).
+Changes are mostly to CSV data, queue text files and Markdown documents.
 
-## Repo layout (verified 2026-10-07 — re-list before relying on it)
+## Repo layout (verified 2026-10-08 — re-list before relying on it)
 - `prospects.csv` — lead list, one row per location. Header (12 columns, in order):
   `business_name,category,town,region,phone,website,online_ordering,call_volume_indicator,chain_or_independent,source_url,priority,pitch_angle`
 - `outreach/*.md` — one email draft per prospect (`<slug>.md`; a few are `draft-<slug>.md`).
-- `outreach/manifest.csv` — send queue. Header: `slug,business,email_draft_file,status(queued)`.
-  `email_draft_file` is a filename relative to `outreach/`.
+  `outreach/README*.md` files are docs, not drafts (see `outreach/README-QUEUE.md`).
+- `outreach/queue-YYYY-MM-DD.txt` — the **live send queue**, one file per send date. One entry
+  per line: `email | Business (Location) | source note | status note`; `#` lines are headers.
+  The first field may be a slug (or `mailto:` email) while the email is still being found.
+  File names are matched case-insensitively. Across the checked files, the same email is a
+  hard duplicate; so is the same business unless both entries name different locations
+  (first word of the `(Location)`: `(Dunmore PA)` = `(Dunmore)`, `(Groton)` ≠ `(Canastota)`).
+  The `(Location)` should be the prospect's town or county; one that matches no row for the
+  name is warned about. For duplicates, different locations are compared by the prospect
+  rows they resolve to (a town and its county are the same place).
+- `outreach/do_not_contact.csv` — `business,email,town,reason,added`. Matching is conservative
+  (normalized name, prefix either way, generic words like "pizza"/"restaurant" ignored, slug,
+  email). An optional `town` limits a business entry to queued entries in that town or with no
+  location. A live queue hit is a hard error; on the legacy manifest it is a named warning.
+  Only Stephen adds rows.
+- `outreach/manifest.csv` — **legacy** send queue (not sent from; last updated 2026-10-06).
+  Header: `slug,business,email_draft_file,status(queued)`. Don't delete or reorder its rows.
+- `scripts/validate.py` — the validator. `tests/test_validate.py` + `tests/fixtures/` — its tests.
 - `README.md` — thesis, territory, sourcing/verification doctrine, data caveats, legal & conduct rules.
 - `OUTREACH.md` — sales kit (offer, scripts, objections, billing).
 - `PLAYBOOK.md` — per-customer onboarding checklist.
@@ -27,7 +44,11 @@ test suite or CI. Changes are to CSV data and Markdown documents.
   unless a spec explicitly justifies a dependency.
 - Validation (run from the repo root; standard library only, no network):
   - `python3 scripts/validate.py` — must exit 0 before any data commit. Exits 1 only on
-    hard failures; data-quality warnings are printed, grouped, with counts.
+    hard failures; data-quality warnings are printed, grouped by section (live queue,
+    legacy manifest, prospects/drafts/docs) with counts. By default it checks live queue
+    files dated today or later (box local date).
+  - `python3 scripts/validate.py --all-queues` — also checks past-dated queue files (then a
+    re-queued email or business across dates is a hard duplicate; by default it is a warning).
   - `python3 scripts/validate.py --strict` — full check: warnings also fail. Expected to
     fail until the ticket-1 S2–S4 cleanup lands; its output is the cleanup backlog.
   - `python3 -m unittest discover -s tests -v` — validator tests. Includes a smoke test
