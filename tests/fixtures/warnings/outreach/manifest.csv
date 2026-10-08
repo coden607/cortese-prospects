@@ -1,0 +1,4 @@
+slug,business,email_draft_file,status(queued)
+alpha-testville,Alpha Pizza,alpha-testville.md,queued
+alpha-pizzeria-testville,Alpha Pizzeria of Testville,alpha-pizzeria-testville.md,queued
+closed-testville,Closed Tavern,closed-testville.md,queued

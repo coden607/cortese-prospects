@@ -1,0 +1,3 @@
+business_name,category,town,region,phone,website,online_ordering,call_volume_indicator,chain_or_independent,source_url,priority,pitch_angle
+Alpha Pizza,pizza & takeout,Testville,Test County NY,555-010-0001,alpha.example,yes (ChowNOW),high,independent,https://alpha.example/,A,dash-format phone + free-text ordering
+Beta Wings,wings/bbq,Testville,Test County NY,(555) 010-0002,,no,medium,small local chain (2 locations),https://beta.example/,B,free-text chain value

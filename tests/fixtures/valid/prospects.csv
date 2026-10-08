@@ -1,0 +1,4 @@
+business_name,category,town,region,phone,website,online_ordering,call_volume_indicator,chain_or_independent,source_url,priority,pitch_angle
+Alpha Pizza,pizza & takeout,Testville,Test County NY,(555) 010-0001,alpha.example,no,high,independent,https://alpha.example/,A,fixture row
+Beta Wings,wings/bbq,Testville,Test County NY,(555) 010-0002,,unknown,medium,chain,https://beta.example/,B,"fixture row, with comma"
+Gamma Diner,high-volume diner,Testville,Test County NY,(555) 010-0003,,yes,low,independent,https://gamma.example/,drop,[CLOSED fixture - DO NOT SEND]
